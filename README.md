@@ -16,6 +16,8 @@ In this repository you also find a workflow that uses IPAdapter to generate a fe
 
 ![face analysis](./face_analysis.jpg)
 
+The extension of course requires `dlib` that has to be installed into the ComfyUI environment.
+
 ## Important notes
 
 There are many ways to do this. At the moment I'm using DLib as it's fast and easy to use, if there's an actual interest I will release more options (insightface?).
