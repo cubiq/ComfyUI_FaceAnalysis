@@ -10,7 +10,7 @@ Please read the results as follow:
 
 ## Installation
 
-Please download the DLIB [Shape Predictor](http://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2) and the [Face Recognition](http://dlib.net/files/dlib_face_recognition_resnet_model_v1.dat.bz2) models and place them into the `dlib` directory.
+Please download the DLIB [Shape Predictor](https://huggingface.co/matt3ounstable/dlib_predictor_recognition/resolve/main/shape_predictor_68_face_landmarks.dat?download=true) and the [Face Recognition](https://huggingface.co/matt3ounstable/dlib_predictor_recognition/resolve/main/dlib_face_recognition_resnet_model_v1.dat?download=true) models and place them into the `dlib` directory.
 
 In this repository you also find a workflow that uses IPAdapter to generate a few images and return the distance to the reference fance.
 
