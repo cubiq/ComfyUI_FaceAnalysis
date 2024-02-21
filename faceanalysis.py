@@ -31,18 +31,21 @@ class FaceEmbedDistance:
                 "analysis_models": ("ANALYSIS_MODELS", ),
                 "reference": ("IMAGE", ),
                 "image": ("IMAGE", ),
+                "generate_image_overlay": ("BOOLEAN", { "default": True })
             },
         }
 
-    RETURN_TYPES = ("IMAGE", )
+    RETURN_TYPES = ("IMAGE", "FLOAT", "FLOAT", "STRING")
+    RETURN_NAMES = ("IMAGE", "euclidean", "cosine", "csv")
     OUTPUT_NODE = True
     FUNCTION = "analize"
     CATEGORY = "FaceAnalysis"
 
-    def analize(self, analysis_models, reference, image):
-        font = ImageFont.truetype(os.path.join(os.path.dirname(os.path.realpath(__file__)), "Inconsolata.otf"), 32)
-        background_color = ImageColor.getrgb("#000000AA")
-        txt_height = font.getmask("Q").getbbox()[3] + font.getmetrics()[1]
+    def analize(self, analysis_models, reference, image, generate_image_overlay=True):
+        if generate_image_overlay:
+            font = ImageFont.truetype(os.path.join(os.path.dirname(os.path.realpath(__file__)), "Inconsolata.otf"), 32)
+            background_color = ImageColor.getrgb("#000000AA")
+            txt_height = font.getmask("Q").getbbox()[3] + font.getmetrics()[1]
 
         self.detector = analysis_models.get("detector")
         self.shape_predict = analysis_models.get("shape_predict")
@@ -54,6 +57,8 @@ class FaceEmbedDistance:
             raise Exception('No face detected in reference image')
 
         out = []
+        out_eucl = []
+        out_cos = []
         
         for i in image:
             img = np.array(T.ToPILImage()(i.permute(2, 0, 1)).convert('RGB'))
@@ -62,32 +67,48 @@ class FaceEmbedDistance:
 
             if img is None: # No face detected
                 eucl_dist = 1.0
-                cos_distance = 1.0
+                cos_dist = 1.0
             else:
                 if ref == img: # Same face
                     eucl_dist = 0.0
-                    cos_distance = 0.0
+                    cos_dist = 0.0
                 else:
                     eucl_dist = np.linalg.norm(np.array(ref) - np.array(img))
-                    cos_distance = 1 - np.dot(ref, img) / (np.linalg.norm(ref) * np.linalg.norm(img))
+                    cos_dist = 1 - np.dot(ref, img) / (np.linalg.norm(ref) * np.linalg.norm(img))
             
-            print(f"\033[96mFace Analysis: Euclidean: {eucl_dist}, Cosine: {cos_distance}\033[0m")
+            out_eucl.append(eucl_dist)
+            out_cos.append(cos_dist)
+            
+            print(f"\033[96mFace Analysis: Euclidean: {eucl_dist}, Cosine: {cos_dist}\033[0m")
 
             eucl_dist = round(eucl_dist, 3)
-            cos_distance = round(cos_distance, 3)
+            cos_dist = round(cos_dist, 3)
 
-            tmp = T.ToPILImage()(i.permute(2, 0, 1)).convert('RGBA')
-            txt = Image.new('RGBA', (image.shape[2], txt_height), color=background_color)
-            draw = ImageDraw.Draw(txt)
-            draw.text((0, 0), f"EUC: {eucl_dist} | COS-1: {cos_distance}", font=font, fill=(255, 255, 255, 255))
-            composite = Image.new('RGBA', tmp.size)
-            composite.paste(txt, (0, tmp.height - txt.height))
-            composite = Image.alpha_composite(tmp, composite)
-            out.append(T.ToTensor()(composite))
+            if generate_image_overlay:
+                tmp = T.ToPILImage()(i.permute(2, 0, 1)).convert('RGBA')
+                txt = Image.new('RGBA', (image.shape[2], txt_height), color=background_color)
+                draw = ImageDraw.Draw(txt)
+                draw.text((0, 0), f"EUC: {eucl_dist} | COS-1: {cos_dist}", font=font, fill=(255, 255, 255, 255))
+                composite = Image.new('RGBA', tmp.size)
+                composite.paste(txt, (0, tmp.height - txt.height))
+                composite = Image.alpha_composite(tmp, composite)
+                out.append(T.ToTensor()(composite))
+
+        if out:        
+            img = torch.stack(out).permute(0, 2, 3, 1)
+        else:
+            img = image
         
-        img = torch.stack(out).permute(0, 2, 3, 1)
+        csv = "id,euclidean,cosine\n"
+        if len(out_eucl) == 1:
+            out_eucl = out_eucl[0]
+            out_cos = out_cos[0]
+            csv += f"0,{out_eucl},{out_cos}\n"
+        else:
+            for id, (eucl, cos) in enumerate(zip(out_eucl, out_cos)):
+                csv += f"{id},{eucl},{cos}\n"
 
-        return(img, )
+        return(img, out_eucl, out_cos, csv,)
     
     def get_descriptor(self, image):
         faces = self.detector(image)
