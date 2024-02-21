@@ -31,6 +31,8 @@ class FaceEmbedDistance:
                 "analysis_models": ("ANALYSIS_MODELS", ),
                 "reference": ("IMAGE", ),
                 "image": ("IMAGE", ),
+                "filter_thresh_eucl": ("FLOAT", { "default": 1.0, "min": 0.001, "max": 1.0, "step": 0.001 }),
+                "filter_thresh_cos": ("FLOAT", { "default": 1.0, "min": 0.001, "max": 1.0, "step": 0.001 }),
                 "generate_image_overlay": ("BOOLEAN", { "default": True })
             },
         }
@@ -41,7 +43,7 @@ class FaceEmbedDistance:
     FUNCTION = "analize"
     CATEGORY = "FaceAnalysis"
 
-    def analize(self, analysis_models, reference, image, generate_image_overlay=True):
+    def analize(self, analysis_models, reference, image, filter_thresh_eucl=1.0, filter_thresh_cos=1.0, generate_image_overlay=True):
         if generate_image_overlay:
             font = ImageFont.truetype(os.path.join(os.path.dirname(os.path.realpath(__file__)), "Inconsolata.otf"), 32)
             background_color = ImageColor.getrgb("#000000AA")
@@ -76,29 +78,31 @@ class FaceEmbedDistance:
                     eucl_dist = np.linalg.norm(np.array(ref) - np.array(img))
                     cos_dist = 1 - np.dot(ref, img) / (np.linalg.norm(ref) * np.linalg.norm(img))
             
-            out_eucl.append(eucl_dist)
-            out_cos.append(cos_dist)
-            
-            print(f"\033[96mFace Analysis: Euclidean: {eucl_dist}, Cosine: {cos_dist}\033[0m")
+            if eucl_dist <= filter_thresh_eucl and cos_dist <= filter_thresh_cos:
+                out_eucl.append(eucl_dist)
+                out_cos.append(cos_dist)
+                
+                print(f"\033[96mFace Analysis: Euclidean: {eucl_dist}, Cosine: {cos_dist}\033[0m")
 
-            eucl_dist = round(eucl_dist, 3)
-            cos_dist = round(cos_dist, 3)
+                eucl_dist = round(eucl_dist, 3)
+                cos_dist = round(cos_dist, 3)
 
-            if generate_image_overlay:
-                tmp = T.ToPILImage()(i.permute(2, 0, 1)).convert('RGBA')
-                txt = Image.new('RGBA', (image.shape[2], txt_height), color=background_color)
-                draw = ImageDraw.Draw(txt)
-                draw.text((0, 0), f"EUC: {eucl_dist} | COS-1: {cos_dist}", font=font, fill=(255, 255, 255, 255))
-                composite = Image.new('RGBA', tmp.size)
-                composite.paste(txt, (0, tmp.height - txt.height))
-                composite = Image.alpha_composite(tmp, composite)
-                out.append(T.ToTensor()(composite))
+                if generate_image_overlay:
+                    tmp = T.ToPILImage()(i.permute(2, 0, 1)).convert('RGBA')
+                    txt = Image.new('RGBA', (image.shape[2], txt_height), color=background_color)
+                    draw = ImageDraw.Draw(txt)
+                    draw.text((0, 0), f"EUC: {eucl_dist} | COS-1: {cos_dist}", font=font, fill=(255, 255, 255, 255))
+                    composite = Image.new('RGBA', tmp.size)
+                    composite.paste(txt, (0, tmp.height - txt.height))
+                    composite = Image.alpha_composite(tmp, composite)
+                    out.append(T.ToTensor()(composite).permute(1, 2, 0))
+                else:
+                    out.append(i)
 
-        if out:        
-            img = torch.stack(out).permute(0, 2, 3, 1)
-        else:
-            img = image
-        
+        if not out:
+            raise Exception('No image matches the filter criteria.')
+
+        img = torch.stack(out)
         csv = "id,euclidean,cosine\n"
         if len(out_eucl) == 1:
             out_eucl = out_eucl[0]
