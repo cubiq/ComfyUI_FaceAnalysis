@@ -69,10 +69,20 @@ class FaceEmbedDistance:
 
         self.analysis_models = analysis_models
 
-        ref = np.array(T.ToPILImage()(reference[0].permute(2, 0, 1)).convert('RGB'))
-        ref = self.get_descriptor(ref)
-        if ref is None:
+        #if reference.shape[0] > 1:
+        #    reference = torch.mean(reference, dim=0).unsqueeze(0)
+
+        ref = []
+        for i in reference:
+            ref_emb = self.get_descriptor(np.array(T.ToPILImage()(i.permute(2, 0, 1)).convert('RGB')))
+            if ref_emb is not None:
+                ref.append(torch.from_numpy(ref_emb))
+        
+        if ref == []:
             raise Exception('No face detected in reference image')
+
+        ref = torch.stack(ref)
+        ref = np.array(torch.mean(ref, dim=0))
 
         out = []
         out_eucl = []
