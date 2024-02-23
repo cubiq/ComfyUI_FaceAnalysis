@@ -10,13 +10,14 @@ Please read the results as follow:
 
 ## Installation
 
-Please download the DLIB [Shape Predictor](https://huggingface.co/matt3ounstable/dlib_predictor_recognition/resolve/main/shape_predictor_68_face_landmarks.dat?download=true) and the [Face Recognition](https://huggingface.co/matt3ounstable/dlib_predictor_recognition/resolve/main/dlib_face_recognition_resnet_model_v1.dat?download=true) models and place them into the `dlib` directory.
+The following instructions are written with the assumption that you have [ComfyUI Manager](https://github.com/ltdrdata/ComfyUI-Manager) installed, but it's not required.
 
-In this repository you also find a workflow that uses IPAdapter to generate a few images and return the distance to the reference face.
+1. The extension requires `dlib` installation in your ComfyUI environment. Click 'Manager', click 'Install pip packages', and type: `cmake dlib`.
+2. To install the extension itself, click 'Manager', click 'Install custom nodes', and search for 'face analysis'. You should see this repository in the results. Click 'Install'.
+3. After installing the extension you should now have folder `ComfyUI\custom_nodes\ComfyUI_FaceAnalysis\dlib`. Download [Shape Predictor](https://huggingface.co/matt3ounstable/dlib_predictor_recognition/resolve/main/shape_predictor_68_face_landmarks.dat?download=true) and the [Face Recognition](https://huggingface.co/matt3ounstable/dlib_predictor_recognition/resolve/main/dlib_face_recognition_resnet_model_v1.dat?download=true) models and place them into the `dlib` directory.
+4. Load the 'face_analysis.json' workflow file. It uses IPAdapter to generate a few images and return the distance to the reference face.
 
 ![face analysis](./face_analysis.jpg)
-
-The extension of course requires `dlib` that has to be installed into the ComfyUI environment.
 
 ## Important notes
 
