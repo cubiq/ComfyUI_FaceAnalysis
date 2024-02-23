@@ -1,5 +1,26 @@
-import dlib
-from insightface.app import FaceAnalysis
+IS_DLIB_INSTALLED = False
+try:
+    import dlib
+    IS_DLIB_INSTALLED = True
+except ImportError:
+    pass
+
+IS_INSIGHTFACE_INSTALLED = False
+try:
+    from insightface.app import FaceAnalysis
+    IS_INSIGHTFACE_INSTALLED = True
+except ImportError:
+    pass
+
+if not IS_DLIB_INSTALLED and not IS_INSIGHTFACE_INSTALLED:
+    raise Exception("Please install either dlib or insightface to use this node.")
+
+INSTALLED_LIBRARIES = []
+if IS_DLIB_INSTALLED:
+    INSTALLED_LIBRARIES.append("dlib")
+if IS_INSIGHTFACE_INSTALLED:
+    INSTALLED_LIBRARIES.append("insightface")
+
 import torch
 import torchvision.transforms.v2 as T
 import os
@@ -14,7 +35,7 @@ class FaceAnalysisModels:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {
-            "library": (["dlib", "insightface"], ),
+            "library": (INSTALLED_LIBRARIES, ),
             "provider": (["CPU", "CUDA", "DirectML", "OpenVINO", "ROCM", "CoreML"], ),
         }}
 
@@ -68,9 +89,6 @@ class FaceEmbedDistance:
             txt_height = font.getmask("Q").getbbox()[3] + font.getmetrics()[1]
 
         self.analysis_models = analysis_models
-
-        #if reference.shape[0] > 1:
-        #    reference = torch.mean(reference, dim=0).unsqueeze(0)
 
         ref = []
         for i in reference:
