@@ -22,7 +22,9 @@ if IS_INSIGHTFACE_INSTALLED:
     INSTALLED_LIBRARIES.append("insightface")
 
 import torch
+import torch.nn.functional as F
 import torchvision.transforms.v2 as T
+import comfy.utils
 import os
 import folder_paths
 import numpy as np
@@ -132,14 +134,12 @@ class FaceBoundingBox:
 
         if not out_img:
             raise Exception('No face detected in image.')
-                
-        out_img = torch.stack(out_img)
 
-        if out_img.shape[0] == 1:
+        if len(out_img) == 1:
             index = 0
 
-        if index > out_img.shape[0] - 1:
-            index = out_img.shape[0] - 1
+        if index > len(out_img) - 1:
+            index = len(out_img) - 1
 
         if index != -1:
             out_img = out_img[index].unsqueeze(0)
@@ -147,6 +147,13 @@ class FaceBoundingBox:
             out_y = out_y[index]
             out_w = out_w[index]
             out_h = out_h[index]
+        else:
+            w = out_img[0].shape[1]
+            h = out_img[0].shape[0]
+
+            out_img = [comfy.utils.common_upscale(img.unsqueeze(0).movedim(-1,1), w, h, "bilinear", "center").movedim(1,-1).squeeze(0) for img in out_img]
+            out_img = torch.stack(out_img)
+            
         
         return (out_img, out_x, out_y, out_w, out_h,)
 
