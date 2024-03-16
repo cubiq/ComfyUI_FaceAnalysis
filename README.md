@@ -2,11 +2,7 @@
 
 This extension uses [DLib](http://dlib.net/) to calculate the Euclidean and Cosine *distance* between two faces.
 
-Please read the results as follow:
-
-- **Lower values are better**
-- The minimum thresholds are: **EUC 0.6**, **COS 0.07**
-- In my tests a value of Euc <0.3 is very good
+The best way to evaluate generated faces is to first send a batch of 3 reference images to the node and compare them to a forth reference (all actual pictures of the person). That will give you a baseline number that you can use to compare to generated images.
 
 ## Installation
 

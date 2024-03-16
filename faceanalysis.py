@@ -89,6 +89,7 @@ class FaceBoundingBox:
     RETURN_NAMES = ("IMAGE", "x", "y", "width", "height")
     FUNCTION = "bbox"
     CATEGORY = "FaceAnalysis"
+    OUTPUT_IS_LIST = (True, True, True, True, True,)
 
     def bbox(self, analysis_models, image, padding, index=-1):
         out_img = []
@@ -111,7 +112,7 @@ class FaceBoundingBox:
                     w = min(img.width, w + 2 * padding)
                     h = min(img.height, h + 2 * padding)
                     crop = img.crop((x, y, x + w, y + h))
-                    out_img.append(T.ToTensor()(crop).permute(1, 2, 0))
+                    out_img.append(T.ToTensor()(crop).permute(1, 2, 0).unsqueeze(0))
                     out_x.append(x)
                     out_y.append(y)
                     out_w.append(w)
@@ -126,7 +127,7 @@ class FaceBoundingBox:
                     w = min(img.width, w + 2 * padding)
                     h = min(img.height, h + 2 * padding)
                     crop = img.crop((x, y, x + w, y + h))
-                    out_img.append(T.ToTensor()(crop).permute(1, 2, 0))
+                    out_img.append(T.ToTensor()(crop).permute(1, 2, 0).unsqueeze(0))
                     out_x.append(x)
                     out_y.append(y)
                     out_w.append(w)
@@ -142,18 +143,17 @@ class FaceBoundingBox:
             index = len(out_img) - 1
 
         if index != -1:
-            out_img = out_img[index].unsqueeze(0)
-            out_x = out_x[index]
-            out_y = out_y[index]
-            out_w = out_w[index]
-            out_h = out_h[index]
-        else:
-            w = out_img[0].shape[1]
-            h = out_img[0].shape[0]
+            out_img = [out_img[index]]
+            out_x = [out_x[index]]
+            out_y = [out_y[index]]
+            out_w = [out_w[index]]
+            out_h = [out_h[index]]
+        #else:
+        #    w = out_img[0].shape[1]
+        #    h = out_img[0].shape[0]
 
-            out_img = [comfy.utils.common_upscale(img.unsqueeze(0).movedim(-1,1), w, h, "bilinear", "center").movedim(1,-1).squeeze(0) for img in out_img]
-            out_img = torch.stack(out_img)
-            
+            #out_img = [comfy.utils.common_upscale(img.unsqueeze(0).movedim(-1,1), w, h, "bilinear", "center").movedim(1,-1).squeeze(0) for img in out_img]
+            #out_img = torch.stack(out_img)
         
         return (out_img, out_x, out_y, out_w, out_h,)
 
@@ -167,17 +167,18 @@ class FaceEmbedDistance:
                 "image": ("IMAGE", ),
                 "filter_thresh_eucl": ("FLOAT", { "default": 1.0, "min": 0.001, "max": 2.0, "step": 0.001 }),
                 "filter_thresh_cos": ("FLOAT", { "default": 1.0, "min": 0.001, "max": 2.0, "step": 0.001 }),
-                "generate_image_overlay": ("BOOLEAN", { "default": True })
+                "filter_best": ("INT", { "default": 0, "min": 0, "max": 4096, "step": 1 }),
+                "generate_image_overlay": ("BOOLEAN", { "default": True }),
             },
         }
 
-    RETURN_TYPES = ("IMAGE", "FLOAT", "FLOAT", "STRING")
-    RETURN_NAMES = ("IMAGE", "euclidean", "cosine", "csv")
-    OUTPUT_NODE = True
+    RETURN_TYPES = ("IMAGE", "FLOAT", "FLOAT")
+    RETURN_NAMES = ("IMAGE", "euclidean", "cosine")
+    OUTPUT_IS_LIST = (False, True, True)
     FUNCTION = "analize"
     CATEGORY = "FaceAnalysis"
 
-    def analize(self, analysis_models, reference, image, filter_thresh_eucl=1.0, filter_thresh_cos=1.0, generate_image_overlay=True):
+    def analize(self, analysis_models, reference, image, filter_thresh_eucl=1.0, filter_thresh_cos=1.0, filter_best=0, generate_image_overlay=True):
         if generate_image_overlay:
             font = ImageFont.truetype(os.path.join(os.path.dirname(os.path.realpath(__file__)), "Inconsolata.otf"), 32)
             background_color = ImageColor.getrgb("#000000AA")
@@ -238,17 +239,20 @@ class FaceEmbedDistance:
         if not out:
             raise Exception('No image matches the filter criteria.')
 
-        img = torch.stack(out)
-        csv = "id,euclidean,cosine\n"
-        if len(out_eucl) == 1:
-            out_eucl = out_eucl[0]
-            out_cos = out_cos[0]
-            csv += f"0,{out_eucl},{out_cos}\n"
-        else:
-            for id, (eucl, cos) in enumerate(zip(out_eucl, out_cos)):
-                csv += f"{id},{eucl},{cos}\n"
+        # filter out the best matches
+        if filter_best > 0:
+            out = np.array(out)
+            out_eucl = np.array(out_eucl)
+            out_cos = np.array(out_cos)
+            idx = np.argsort((out_eucl + out_cos) / 2)
+            out = torch.from_numpy(out[idx][:filter_best])
+            out_eucl = out_eucl[idx][:filter_best].tolist()
+            out_cos = out_cos[idx][:filter_best].tolist()
 
-        return(img, out_eucl, out_cos, csv,)
+        if isinstance(out, list):
+            out = torch.stack(out)
+
+        return(out, out_eucl, out_cos,)
     
     def get_descriptor(self, image):
         embeds = None
