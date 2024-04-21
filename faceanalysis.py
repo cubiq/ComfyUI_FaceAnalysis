@@ -241,13 +241,15 @@ class FaceEmbedDistance:
 
         # filter out the best matches
         if filter_best > 0:
-            out = np.array(out)
-            out_eucl = np.array(out_eucl)
-            out_cos = np.array(out_cos)
-            idx = np.argsort((out_eucl + out_cos) / 2)
-            out = torch.from_numpy(out[idx][:filter_best])
-            out_eucl = out_eucl[idx][:filter_best].tolist()
-            out_cos = out_cos[idx][:filter_best].tolist()
+            out_eucl = torch.tensor(out_eucl)
+            out_cos = torch.tensor(out_cos)
+            scores = (out_eucl + out_cos) / 2
+            _, idx = torch.sort(scores)
+
+            # Select the best matches using the sorted indices
+            out = [out[i] for i in idx[:filter_best]]
+            out_eucl = out_eucl[idx][:filter_best].numpy().tolist()
+            out_cos = out_cos[idx][:filter_best].numpy().tolist()
 
         if isinstance(out, list):
             out = torch.stack(out)
