@@ -188,7 +188,7 @@ class FaceEmbedDistance:
 
         ref = []
         for i in reference:
-            ref_emb = self.get_descriptor(np.array(T.ToPILImage()(i.permute(2, 0, 1)).convert('RGB')))
+            ref_emb = self.get_descriptor(np.array(T.ToPILImage()(i.permute(2, 0, 1).cpu()).convert('RGB')))
             if ref_emb is not None:
                 ref.append(torch.from_numpy(ref_emb))
         
@@ -203,7 +203,7 @@ class FaceEmbedDistance:
         out_cos = []
         
         for i in image:
-            img = np.array(T.ToPILImage()(i.permute(2, 0, 1)).convert('RGB'))
+            img = np.array(T.ToPILImage()(i.permute(2, 0, 1).cpu()).convert('RGB'))
 
             img = self.get_descriptor(img)
 
