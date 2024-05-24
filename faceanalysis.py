@@ -47,6 +47,58 @@ def image_to_tensor(image):
     return T.ToTensor()(image).permute(1, 2, 0)
     #return T.ToTensor()(Image.fromarray(image)).permute(1, 2, 0)
 
+def expand_mask(mask, expand, tapered_corners):
+    import scipy
+
+    c = 0 if tapered_corners else 1
+    kernel = np.array([[c, 1, c],
+                       [1, 1, 1],
+                       [c, 1, c]])
+    mask = mask.reshape((-1, mask.shape[-2], mask.shape[-1]))
+    out = []
+    for m in mask:
+        output = m.numpy()
+        for _ in range(abs(expand)):
+            if expand < 0:
+                output = scipy.ndimage.grey_erosion(output, footprint=kernel)
+            else:
+                output = scipy.ndimage.grey_dilation(output, footprint=kernel)
+        output = torch.from_numpy(output)
+        out.append(output)
+
+    return torch.stack(out, dim=0)
+
+def transformation_from_points(points1, points2):
+    points1 = points1.astype(np.float64)
+    points2 = points2.astype(np.float64)
+
+    c1 = np.mean(points1, axis=0)
+    c2 = np.mean(points2, axis=0)
+    points1 -= c1
+    points2 -= c2
+
+    s1 = np.std(points1)
+    s2 = np.std(points2)
+    points1 /= s1
+    points2 /= s2
+
+    U, S, Vt = np.linalg.svd(points1.T * points2)
+
+    R = (U * Vt).T
+
+    return np.vstack([np.hstack(((s2 / s1) * R, 
+                                 c2.T - (s2 / s1) * R * c1.T)),
+                                 np.matrix([0., 0., 1.])])
+
+def mask_from_landmarks(image, landmarks):
+    import cv2
+
+    mask = np.zeros(image.shape[:2], dtype=np.float64)
+    points = cv2.convexHull(landmarks)
+    cv2.fillConvexPoly(mask, points, color=1)
+
+    return mask
+
 class InsightFace:
     def __init__(self, provider="CPU", name="buffalo_l"):
         self.face_analysis = FaceAnalysis(name=name, root=INSIGHTFACE_DIR, providers=[provider + 'ExecutionProvider',])
@@ -89,6 +141,39 @@ class InsightFace:
             w.append(x2 - x1)
             h.append(y2 - y1)
         return (img, x, y, w, h)
+    
+    def get_keypoints(self, image):
+        face = self.get_face(image)
+        if face is not None:
+            shape = face[0]['kps']
+            right_eye = shape[0]
+            left_eye = shape[1]
+            nose = shape[2]
+            left_mouth = shape[3]
+            right_mouth = shape[4]
+            
+            return [left_eye, right_eye, nose, left_mouth, right_mouth]
+        return None
+
+    def get_landmarks(self, image, extended_landmarks=False):
+        face = self.get_face(image)
+        if face is not None:
+            shape = face[0]['landmark_2d_106']
+            landmarks = np.round(shape).astype(np.int64)
+
+            main_features = landmarks[33:]
+            left_eye = landmarks[87:97]
+            right_eye = landmarks[33:43]
+            eyes = landmarks[[*range(33,43), *range(87,97)]]
+            nose = landmarks[72:87]
+            mouth = landmarks[52:72]
+            left_brow = landmarks[97:106]
+            right_brow = landmarks[43:52]
+            outline = landmarks[[*range(33), *range(48,51), *range(102, 105)]]
+            outline_forehead = outline
+
+            return [landmarks, main_features, eyes, left_eye, right_eye, nose, mouth, left_brow, right_brow, outline, outline_forehead]
+        return None
 
 class DLib:
     def __init__(self):
@@ -136,12 +221,49 @@ class DLib:
             h.append(y2 - y1)
         return (img, x, y, w, h)
     
-    def get_landmarks(self, image):
+    def get_keypoints(self, image):
         faces = self.get_face(image)
         if faces is not None:
             shape = self.shape_predictor(image, faces[0])
-            return shape
+          
+            left_eye = [(shape.part(0).x + shape.part(1).x // 2), (shape.part(0).y + shape.part(1).y) // 2]
+            right_eye = [(shape.part(2).x + shape.part(3).x // 2), (shape.part(2).y + shape.part(3).y) // 2]
+            nose = [shape.part(4).x, shape.part(4).y]
+
+            return [left_eye, right_eye, nose]
         return None
+    
+    def get_landmarks(self, image, extended_landmarks=False):
+        if extended_landmarks:
+            if not os.path.exists(os.path.join(DLIB_DIR, "shape_predictor_81_face_landmarks.dat")):
+                raise Exception("The 68 point landmark model is not available. Please download it from https://huggingface.co/matt3ounstable/dlib_predictor_recognition/blob/main/shape_predictor_81_face_landmarks.dat")
+            predictor = dlib.shape_predictor(os.path.join(DLIB_DIR, "shape_predictor_81_face_landmarks.dat"))
+        else:
+            if not os.path.exists(os.path.join(DLIB_DIR, "shape_predictor_68_face_landmarks.dat")):
+                raise Exception("The 68 point landmark model is not available. Please download it from https://huggingface.co/matt3ounstable/dlib_predictor_recognition/blob/main/shape_predictor_68_face_landmarks.dat")
+            predictor = dlib.shape_predictor(os.path.join(DLIB_DIR, "shape_predictor_68_face_landmarks.dat"))
+
+        faces = self.get_face(image)
+        if faces is not None:
+            shape = predictor(image, faces[0])
+            landmarks = np.array([[p.x, p.y] for p in shape.parts()])
+            main_features = landmarks[17:68]
+            left_eye = landmarks[42:48]
+            right_eye = landmarks[36:42]
+            eyes = landmarks[36:48]
+            nose = landmarks[27:36]
+            mouth = landmarks[48:68]
+            left_brow = landmarks[17:22]
+            right_brow = landmarks[22:27]
+            outline = landmarks[[*range(17), *range(26,16,-1)]]
+            if extended_landmarks:
+                outline_forehead = landmarks[[*range(17), *range(26,16,-1), *range(68, 81)]]
+            else:
+                outline_forehead = outline
+
+            return [landmarks, main_features, eyes, left_eye, right_eye, nose, mouth, left_brow, right_brow, outline, outline_forehead]
+        return None
+
 
 class FaceAnalysisModels:
     @classmethod
@@ -286,7 +408,7 @@ class FaceEmbedDistance:
             else:
                 if np.array_equal(ref, img): # Same face
                     dist = 0.0
-                    norm_dist = 1
+                    norm_dist = 0.0
                 else:
                     if similarity_metric == "L2_norm":
                         #dist = euclidean_distance(ref, img, True)
@@ -332,6 +454,9 @@ class FaceEmbedDistance:
 
         if isinstance(out, list):
             out = torch.stack(out)
+        
+        if out.shape[3] > 3:
+            out = out[:, :, :, :3]
 
         return(out, out_dist,)
 
@@ -353,28 +478,16 @@ class FaceAlign:
 
     def align(self, analysis_models, image_from, image_to=None):
         image_from = tensor_to_image(image_from[0])
-        shape = analysis_models.get_landmarks(image_from)
-        r_eye_from = (
-            int((shape.part(2).x + shape.part(3).x) // 2),
-            int((shape.part(2).y + shape.part(3).y) // 2)
-        )
-        l_eye_from = (
-            int((shape.part(0).x + shape.part(1).x) // 2),
-            int((shape.part(0).y + shape.part(1).y) // 2)
-        )
+        shape = analysis_models.get_keypoints(image_from)
+        l_eye_from = shape[0]
+        r_eye_from = shape[1]
         angle = float(np.degrees(np.arctan2(l_eye_from[1] - r_eye_from[1], l_eye_from[0] - r_eye_from[0])))
 
         if image_to is not None:
             image_to = tensor_to_image(image_to[0])
-            shape = analysis_models.get_landmarks(image_to)
-            r_eye_to = (
-                int((shape.part(2).x + shape.part(3).x) // 2),
-                int((shape.part(2).y + shape.part(3).y) // 2)
-            )
-            l_eye_to = (
-                int((shape.part(0).x + shape.part(1).x) // 2),
-                int((shape.part(0).y + shape.part(1).y) // 2)
-            )
+            shape = analysis_models.get_keypoints(image_to)
+            l_eye_to = shape[0]
+            r_eye_to = shape[1]
             angle -= float(np.degrees(np.arctan2(l_eye_to[1] - r_eye_to[1], l_eye_to[0] - r_eye_to[0])))
 
         # rotate the image
@@ -386,6 +499,177 @@ class FaceAlign:
 
         return (image_from, )
 
+class faceSegmentation:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "analysis_models": ("ANALYSIS_MODELS", ),
+                "image": ("IMAGE", ),
+                "area": (["face", "main_features", "eyes", "left_eye", "right_eye", "nose", "mouth", "face+forehead (if available)"], ),
+                "grow": ("INT", { "default": 0, "min": -4096, "max": 4096, "step": 1 }),
+                "grow_tapered": ("BOOLEAN", { "default": False }),
+                "blur": ("INT", { "default": 13, "min": 1, "max": 4096, "step": 2 }),
+            }
+        }
+
+    RETURN_TYPES = ("MASK", "IMAGE", "MASK", "IMAGE", "INT", "INT", "INT", "INT")
+    RETURN_NAMES = ("mask", "image", "seg_mask", "seg_image", "x", "y", "width", "height")
+    FUNCTION = "segment"
+    CATEGORY = "FaceAnalysis"
+
+    def segment(self, analysis_models, image, area, grow, grow_tapered, blur):
+        face = tensor_to_image(image[0])
+
+        if face is None:
+            raise Exception('No face detected in image')
+
+        landmarks = analysis_models.get_landmarks(face, extended_landmarks=("forehead" in area))
+
+        if area == "face":
+            landmarks = landmarks[-2]
+        elif area == "eyes":
+            landmarks = landmarks[2]
+        elif area == "left_eye":
+            landmarks = landmarks[3]
+        elif area == "right_eye":
+            landmarks = landmarks[4]
+        elif area == "nose":
+            landmarks = landmarks[5]
+        elif area == "mouth":
+            landmarks = landmarks[6]
+        elif area == "main_features":
+            landmarks = landmarks[1]
+        elif "forehead" in area:
+            landmarks = landmarks[-1]
+
+        #mask = np.zeros(face.shape[:2], dtype=np.float64)
+        #points = cv2.convexHull(landmarks)
+        #cv2.fillConvexPoly(mask, points, color=1)
+
+        mask = mask_from_landmarks(face, landmarks)
+        mask = image_to_tensor(mask).unsqueeze(0).squeeze(-1).clamp(0, 1)
+
+        _, y, x = torch.where(mask)
+        x1, x2 = x.min().item(), x.max().item()
+        y1, y2 = y.min().item(), y.max().item()
+        smooth = int(min(max((x2 - x1), (y2 - y1)) * 0.2, 99))
+
+        if smooth > 1:
+            if smooth % 2 == 0:
+                smooth+= 1
+            mask = T.functional.gaussian_blur(mask.bool().unsqueeze(1), smooth).squeeze(1).float()
+        
+        if grow != 0:
+            mask = expand_mask(mask, grow, grow_tapered)
+
+        if blur > 1:
+            if blur % 2 == 0:
+                blur+= 1
+            mask = T.functional.gaussian_blur(mask.unsqueeze(1), blur).squeeze(1).float()
+
+        # extract segment from image
+        _, y, x = torch.where(mask)
+        x1, x2 = x.min().item(), x.max().item()
+        y1, y2 = y.min().item(), y.max().item()
+        segment_mask = mask[:, y1:y2, x1:x2]
+        segment_image = image[0][y1:y2, x1:x2, :].unsqueeze(0)
+
+        image = image * mask.unsqueeze(-1).repeat(1, 1, 1, 3)
+
+        return (mask, image, segment_mask, segment_image, x1, y1, x2 - x1, y2 - y1,)
+
+
+class FaceWarp:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "analysis_models": ("ANALYSIS_MODELS", ),
+                "image_from": ("IMAGE", ),
+                "image_to": ("IMAGE", ),
+                "keypoints": (["main features", "full face", "full face+forehead (if available)"], ),
+                "grow": ("INT", { "default": 0, "min": -4096, "max": 4096, "step": 1 }),
+                "blur": ("INT", { "default": 13, "min": 1, "max": 4096, "step": 2 }),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE", "MASK",)
+    FUNCTION = "warp"
+    CATEGORY = "FaceAnalysis"
+
+    def warp(self, analysis_models, image_from, image_to, keypoints, grow, blur):
+        import cv2
+        from color_matcher import ColorMatcher
+        from color_matcher.normalizer import Normalizer
+
+        cm = ColorMatcher()
+        image_from = tensor_to_image(image_from[0])
+        image_to = tensor_to_image(image_to[0])
+
+        shape_from = analysis_models.get_landmarks(image_from, extended_landmarks=("forehead" in keypoints))
+        shape_to = analysis_models.get_landmarks(image_to, extended_landmarks=("forehead" in keypoints))
+
+        if keypoints == "main features":
+            shape_from = shape_from[1]
+            shape_to = shape_to[1]
+        else:
+            shape_from = shape_from[0]
+            shape_to = shape_to[0]
+
+        # get the transformation matrix
+        from_points = np.array(shape_from, dtype=np.float64)
+        to_points = np.array(shape_to, dtype=np.float64)
+        
+        matrix = cv2.estimateAffine2D(from_points, to_points)[0]
+        output = cv2.warpAffine(image_from, matrix, (image_to.shape[1], image_to.shape[0]), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT_101)
+
+        mask_from = mask_from_landmarks(image_from, shape_from)
+        mask_to = mask_from_landmarks(image_to, shape_to)
+        output_mask = cv2.warpAffine(mask_from, matrix, (image_to.shape[1], image_to.shape[0]))
+
+        output_mask = torch.from_numpy(output_mask).unsqueeze(0).unsqueeze(-1).float()
+        mask_to = torch.from_numpy(mask_to).unsqueeze(0).unsqueeze(-1).float()
+        output_mask = torch.min(output_mask, mask_to)
+
+        output = image_to_tensor(output).unsqueeze(0)
+        image_to = image_to_tensor(image_to).unsqueeze(0)
+        
+        if grow != 0:
+            output_mask = expand_mask(output_mask.squeeze(-1), grow, True).unsqueeze(-1)
+
+        if blur > 1:
+            if blur % 2 == 0:
+                blur+= 1
+            output_mask = T.functional.gaussian_blur(output_mask.permute(0,3,1,2), blur).permute(0,2,3,1)
+
+        padding = 0
+
+        _, y, x, _ = torch.where(mask_to)
+        x1 = max(0, x.min().item() - padding)
+        y1 = max(0, y.min().item() - padding)
+        x2 = min(image_to.shape[2], x.max().item() + padding)
+        y2 = min(image_to.shape[1], y.max().item() + padding)
+        cm_ref = image_to[:, y1:y2, x1:x2, :]
+
+        _, y, x, _ = torch.where(output_mask)
+        x1 = max(0, x.min().item() - padding)
+        y1 = max(0, y.min().item() - padding)
+        x2 = min(output.shape[2], x.max().item() + padding)
+        y2 = min(output.shape[1], y.max().item() + padding)
+        cm_image = output[:, y1:y2, x1:x2, :]
+
+        normalized = cm.transfer(src=Normalizer(cm_image[0].numpy()).type_norm() , ref=Normalizer(cm_ref[0].numpy()).type_norm(), method='mkl')
+        normalized = torch.from_numpy(normalized).unsqueeze(0)
+
+        factor = 0.8
+
+        output[:, y1:y1+cm_image.shape[1], x1:x1+cm_image.shape[2], :] = factor * normalized + (1 - factor) * cm_image
+
+        output_image = output * output_mask + image_to * (1 - output_mask)
+        output_mask = output_mask.squeeze(-1)
+
+        return (output_image, output_mask)
 
 """
 def cos_distance(source, test):
@@ -413,12 +697,16 @@ NODE_CLASS_MAPPINGS = {
     "FaceEmbedDistance": FaceEmbedDistance,
     "FaceAnalysisModels": FaceAnalysisModels,
     "FaceBoundingBox": FaceBoundingBox,
-    #"FaceAlign": FaceAlign,
+    "FaceAlign": FaceAlign,
+    "FaceSegmentation": faceSegmentation,
+    "FaceWarp": FaceWarp,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "FaceEmbedDistance": "Face Embeds Distance",
     "FaceAnalysisModels": "Face Analysis Models",
     "FaceBoundingBox": "Face Bounding Box",
-    #"FaceAlign": "Face Align",
+    "FaceAlign": "Face Align",
+    "FaceSegmentation": "Face Segmentation",
+    "FaceWarp": "Face Warp",
 }
