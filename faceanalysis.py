@@ -190,8 +190,11 @@ class DLib:
 
     def get_face(self, image):
         faces = self.face_detector(np.array(image), 1)
+        #faces, scores, _ = self.face_detector.run(np.array(image), 1, -1)
+        
         if len(faces) > 0:
             return sorted(faces, key=lambda x: x.area(), reverse=True)
+            #return [face for _, face in sorted(zip(scores, faces), key=lambda x: x[0], reverse=True)] # sort by score
         return None
 
     def get_embeds(self, image):
@@ -667,7 +670,8 @@ class FaceWarp:
         output[:, y1:y1+cm_image.shape[1], x1:x1+cm_image.shape[2], :] = factor * normalized + (1 - factor) * cm_image
 
         output_image = output * output_mask + image_to * (1 - output_mask)
-        output_mask = output_mask.squeeze(-1)
+        output_image = output_image.clamp(0, 1)
+        output_mask = output_mask.clamp(0, 1).squeeze(-1)
 
         return (output_image, output_mask)
 
