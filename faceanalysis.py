@@ -446,17 +446,14 @@ class FaceEmbedDistance:
 
         if not out:
             raise Exception('No image matches the filter criteria.')
+    
+        out = torch.stack(out)
 
         # filter out the best matches
         if filter_best > 0:
-            out = np.array(out)
-            out_dist = np.array(out_dist)
-            idx = np.argsort(out_dist)
-            out = torch.from_numpy(out[idx][:filter_best])
-            out_dist = out_dist[idx][:filter_best].tolist()
-
-        if isinstance(out, list):
-            out = torch.stack(out)
+            out_dist, idx = torch.topk(torch.tensor(out_dist), filter_best, largest=False)
+            out = out[idx]
+            out_dist = out_dist.cpu().numpy().tolist()
         
         if out.shape[3] > 3:
             out = out[:, :, :, :3]
