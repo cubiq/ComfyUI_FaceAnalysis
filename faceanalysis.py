@@ -451,6 +451,7 @@ class FaceEmbedDistance:
 
         # filter out the best matches
         if filter_best > 0:
+            filter_best = min(filter_best, len(out))
             out_dist, idx = torch.topk(torch.tensor(out_dist), filter_best, largest=False)
             out = out[idx]
             out_dist = out_dist.cpu().numpy().tolist()
