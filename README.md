@@ -12,4 +12,11 @@ For DLIB download [Shape Predictor](https://huggingface.co/matt3ounstable/dlib_p
 
 Precompiled Dlib for Windows can be found [here](https://github.com/z-mahmud22/Dlib_Windows_Python3.x).
 
+## ComfyUI Windows Standalone
+- Install precompiled Dlib for windows (per above)
+- Copy [Shape Predictor](https://huggingface.co/matt3ounstable/dlib_predictor_recognition/resolve/main/shape_predictor_68_face_landmarks.dat?download=true), [Face Predictor 5 landmarks](https://huggingface.co/matt3ounstable/dlib_predictor_recognition/resolve/main/shape_predictor_5_face_landmarks.dat?download=true), [Face Predictor 81 landmarks](https://huggingface.co/matt3ounstable/dlib_predictor_recognition/resolve/main/shape_predictor_81_face_landmarks.dat?download=true) and [Face Recognition](https://huggingface.co/matt3ounstable/dlib_predictor_recognition/resolve/main/dlib_face_recognition_resnet_model_v1.dat?download=true) into:
+
+  **your_comfyui\python_embeded\Lib\site-packages\dlib**
+***
+
 ![face analysis](./face_analysis.jpg)
