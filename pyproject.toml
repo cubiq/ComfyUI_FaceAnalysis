@@ -1,0 +1,15 @@
+[project]
+name = "comfyui_faceanalysis"
+description = "This extension uses [a/DLib](http://dlib.net/) to calculate the Euclidean and Cosine distance between two faces.\nNOTE: Install the Shape Predictor, Face Recognition model from the Install models menu."
+version = "1.0.0"
+license = "LICENSE"
+dependencies = ["dlib", "onnxruntime", "insightface", "color_matcher"]
+
+[project.urls]
+Repository = "https://github.com/cubiq/ComfyUI_FaceAnalysis"
+#  Used by Comfy Registry https://comfyregistry.org
+
+[tool.comfy]
+PublisherId = ""
+DisplayName = "ComfyUI_FaceAnalysis"
+Icon = ""
