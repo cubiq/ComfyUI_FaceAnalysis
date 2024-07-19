@@ -16,9 +16,9 @@ if not IS_DLIB_INSTALLED and not IS_INSIGHTFACE_INSTALLED:
     raise Exception("Please install either dlib or insightface to use this node.")
 
 import torch
-#import torch.nn.functional as F
+import torch.nn.functional as F
 import torchvision.transforms.v2 as T
-#import comfy.utils
+from comfy.utils import ProgressBar
 import os
 import folder_paths
 import numpy as np
@@ -54,7 +54,8 @@ def expand_mask(mask, expand, tapered_corners):
     kernel = np.array([[c, 1, c],
                        [1, 1, 1],
                        [c, 1, c]])
-    mask = mask.reshape((-1, mask.shape[-2], mask.shape[-1]))
+    device = mask.device
+    mask = mask.reshape((-1, mask.shape[-2], mask.shape[-1])).cpu()
     out = []
     for m in mask:
         output = m.numpy()
@@ -66,7 +67,7 @@ def expand_mask(mask, expand, tapered_corners):
         output = torch.from_numpy(output)
         out.append(output)
 
-    return torch.stack(out, dim=0)
+    return torch.stack(out, dim=0).to(device)
 
 def transformation_from_points(points1, points2):
     points1 = points1.astype(np.float64)
@@ -520,65 +521,136 @@ class faceSegmentation:
     CATEGORY = "FaceAnalysis"
 
     def segment(self, analysis_models, image, area, grow, grow_tapered, blur):
-        face = tensor_to_image(image[0])
+        steps = image.shape[0]
 
-        if face is None:
-            raise Exception('No face detected in image')
+        if steps > 1:
+            pbar = ProgressBar(steps)
 
-        landmarks = analysis_models.get_landmarks(face, extended_landmarks=("forehead" in area))
+        out_mask = []
+        out_image = []
+        out_seg_mask = []
+        out_seg_image = []
+        out_x = []
+        out_y = []
+        out_w = []
+        out_h = []
 
-        if area == "face":
-            landmarks = landmarks[-2]
-        elif area == "eyes":
-            landmarks = landmarks[2]
-        elif area == "left_eye":
-            landmarks = landmarks[3]
-        elif area == "right_eye":
-            landmarks = landmarks[4]
-        elif area == "nose":
-            landmarks = landmarks[5]
-        elif area == "mouth":
-            landmarks = landmarks[6]
-        elif area == "main_features":
-            landmarks = landmarks[1]
-        elif "forehead" in area:
-            landmarks = landmarks[-1]
+        for img in image:       
+            face = tensor_to_image(img)
 
-        #mask = np.zeros(face.shape[:2], dtype=np.float64)
-        #points = cv2.convexHull(landmarks)
-        #cv2.fillConvexPoly(mask, points, color=1)
+            if face is None:
+                print(f"\033[96mNo face detected at frame {len(out_image)}\033[0m")
+                img = torch.zeros_like(img)
+                mask = img.clone()[:,:,:1]
+                out_mask.append(mask)
+                out_image.append(img)
+                out_seg_mask.append(mask[:8,:8,:])
+                out_seg_image.append(img[:8,:8,:])
+                out_x.append(0)
+                out_y.append(0)
+                continue
 
-        mask = mask_from_landmarks(face, landmarks)
-        mask = image_to_tensor(mask).unsqueeze(0).squeeze(-1).clamp(0, 1)
+            landmarks = analysis_models.get_landmarks(face, extended_landmarks=("forehead" in area))
 
-        _, y, x = torch.where(mask)
-        x1, x2 = x.min().item(), x.max().item()
-        y1, y2 = y.min().item(), y.max().item()
-        smooth = int(min(max((x2 - x1), (y2 - y1)) * 0.2, 99))
+            if landmarks is None:
+                print(f"\033[96mNo landmarks detected at frame {len(out_image)}\033[0m")
+                img = torch.zeros_like(img)
+                mask = img.clone()[:,:,:1]
+                out_mask.append(mask)
+                out_image.append(img)
+                out_seg_mask.append(mask[:8,:8,:])
+                out_seg_image.append(img[:8,:8,:])
+                out_x.append(0)
+                out_y.append(0)
+                continue
 
-        if smooth > 1:
-            if smooth % 2 == 0:
-                smooth+= 1
-            mask = T.functional.gaussian_blur(mask.bool().unsqueeze(1), smooth).squeeze(1).float()
+            if area == "face":
+                landmarks = landmarks[-2]
+            elif area == "eyes":
+                landmarks = landmarks[2]
+            elif area == "left_eye":
+                landmarks = landmarks[3]
+            elif area == "right_eye":
+                landmarks = landmarks[4]
+            elif area == "nose":
+                landmarks = landmarks[5]
+            elif area == "mouth":
+                landmarks = landmarks[6]
+            elif area == "main_features":
+                landmarks = landmarks[1]
+            elif "forehead" in area:
+                landmarks = landmarks[-1]
+
+            #mask = np.zeros(face.shape[:2], dtype=np.float64)
+            #points = cv2.convexHull(landmarks)
+            #cv2.fillConvexPoly(mask, points, color=1)
+
+            mask = mask_from_landmarks(face, landmarks)
+            mask = image_to_tensor(mask).unsqueeze(0).squeeze(-1).clamp(0, 1).to(device=img.device)
+
+            _, y, x = torch.where(mask)
+            x1, x2 = x.min().item(), x.max().item()
+            y1, y2 = y.min().item(), y.max().item()
+            smooth = int(min(max((x2 - x1), (y2 - y1)) * 0.2, 99))
+
+            if smooth > 1:
+                if smooth % 2 == 0:
+                    smooth+= 1
+                mask = T.functional.gaussian_blur(mask.bool().unsqueeze(1), smooth).squeeze(1).float()
+            
+            if grow != 0:
+                mask = expand_mask(mask, grow, grow_tapered)
+
+            if blur > 1:
+                if blur % 2 == 0:
+                    blur+= 1
+                mask = T.functional.gaussian_blur(mask.unsqueeze(1), blur).squeeze(1).float()
+
+            mask = mask.squeeze(0).unsqueeze(-1)
+
+            # extract segment from image
+            y, x, _ = torch.where(mask)
+            x1, x2 = x.min().item(), x.max().item()
+            y1, y2 = y.min().item(), y.max().item()
+            segment_mask = mask[y1:y2, x1:x2, :]
+            segment_image = img[y1:y2, x1:x2, :]
+            
+            img = img * mask.repeat(1, 1, 3)
+
+            out_mask.append(mask)
+            out_image.append(img)
+            out_seg_mask.append(segment_mask)
+            out_seg_image.append(segment_image)
+            out_x.append(x1)
+            out_y.append(y1)
+
+            if steps > 1:
+                pbar.update(1)
         
-        if grow != 0:
-            mask = expand_mask(mask, grow, grow_tapered)
+        out_mask = torch.stack(out_mask).squeeze(-1)
+        out_image = torch.stack(out_image)
 
-        if blur > 1:
-            if blur % 2 == 0:
-                blur+= 1
-            mask = T.functional.gaussian_blur(mask.unsqueeze(1), blur).squeeze(1).float()
+        # find the max size of out_seg_image
+        max_w = max([img.shape[1] for img in out_seg_image])
+        max_h = max([img.shape[0] for img in out_seg_image])
+        pad_left = [(max_w - img.shape[1])//2 for img in out_seg_image]
+        pad_right = [max_w - img.shape[1] - pad_left[i] for i, img in enumerate(out_seg_image)]
+        pad_top = [(max_h - img.shape[0])//2 for img in out_seg_image]
+        pad_bottom = [max_h - img.shape[0] - pad_top[i] for i, img in enumerate(out_seg_image)]
+        out_seg_image = [F.pad(img.unsqueeze(0).permute([0,3,1,2]), (pad_left[i], pad_right[i], pad_top[i], pad_bottom[i])) for i, img in enumerate(out_seg_image)]
+        out_seg_mask = [F.pad(mask.unsqueeze(0).permute([0,3,1,2]), (pad_left[i], pad_right[i], pad_top[i], pad_bottom[i])) for i, mask in enumerate(out_seg_mask)]
 
-        # extract segment from image
-        _, y, x = torch.where(mask)
-        x1, x2 = x.min().item(), x.max().item()
-        y1, y2 = y.min().item(), y.max().item()
-        segment_mask = mask[:, y1:y2, x1:x2]
-        segment_image = image[0][y1:y2, x1:x2, :].unsqueeze(0)
+        out_seg_image = torch.cat(out_seg_image).permute([0,2,3,1])
+        out_seg_mask = torch.cat(out_seg_mask).squeeze(1)
 
-        image = image * mask.unsqueeze(-1).repeat(1, 1, 1, 3)
+        if len(out_x) == 1:
+            out_x = out_x[0]
+            out_y = out_y[0]
 
-        return (mask, image, segment_mask, segment_image, x1, y1, x2 - x1, y2 - y1,)
+        out_w = out_seg_image.shape[2]
+        out_h = out_seg_image.shape[1]
+
+        return (out_mask, out_image, out_seg_mask, out_seg_image, out_x, out_y, out_w, out_h)
 
 
 class FaceWarp:
@@ -604,74 +676,105 @@ class FaceWarp:
         from color_matcher import ColorMatcher
         from color_matcher.normalizer import Normalizer
 
+        if image_from.shape[0] < image_to.shape[0]:
+            image_from = torch.cat([image_from, image_from[-1:].repeat((image_to.shape[0]-image_from.shape[0], 1, 1, 1))], dim=0)
+        elif image_from.shape[0] > image_to.shape[0]:
+            image_from = image_from[:image_to.shape[0]]
+
+        steps = image_from.shape[0]
+        if steps > 1:
+            pbar = ProgressBar(steps)
+
         cm = ColorMatcher()
-        image_from = tensor_to_image(image_from[0])
-        image_to = tensor_to_image(image_to[0])
 
-        shape_from = analysis_models.get_landmarks(image_from, extended_landmarks=("forehead" in keypoints))
-        shape_to = analysis_models.get_landmarks(image_to, extended_landmarks=("forehead" in keypoints))
+        result_image = []
+        result_mask = []
 
-        if keypoints == "main features":
-            shape_from = shape_from[1]
-            shape_to = shape_to[1]
-        else:
-            shape_from = shape_from[0]
-            shape_to = shape_to[0]
+        for i in range(steps):
+            img_from = tensor_to_image(image_from[i])
+            img_to = tensor_to_image(image_to[i])
 
-        # get the transformation matrix
-        from_points = np.array(shape_from, dtype=np.float64)
-        to_points = np.array(shape_to, dtype=np.float64)
+            shape_from = analysis_models.get_landmarks(img_from, extended_landmarks=("forehead" in keypoints))
+            shape_to = analysis_models.get_landmarks(img_to, extended_landmarks=("forehead" in keypoints))
+
+            if shape_from is None or shape_to is None:
+                print(f"\033[96mNo landmarks detected at frame {i}\033[0m")
+                img = img_to.unsqueeze(0)
+                mask = torch.zeros_like(img)[:,:,:1]
+                result_image.append(img)
+                result_mask.append(mask)
+                continue
+
+            if keypoints == "main features":
+                shape_from = shape_from[1]
+                shape_to = shape_to[1]
+            else:
+                shape_from = shape_from[0]
+                shape_to = shape_to[0]
+
+            # get the transformation matrix
+            from_points = np.array(shape_from, dtype=np.float64)
+            to_points = np.array(shape_to, dtype=np.float64)
+            
+            matrix = cv2.estimateAffine2D(from_points, to_points)[0]
+            output = cv2.warpAffine(img_from, matrix, (img_to.shape[1], img_to.shape[0]), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT_101)
+
+            mask_from = mask_from_landmarks(img_from, shape_from)
+            mask_to = mask_from_landmarks(img_to, shape_to)
+            output_mask = cv2.warpAffine(mask_from, matrix, (img_to.shape[1], img_to.shape[0]))
+
+            output_mask = torch.from_numpy(output_mask).unsqueeze(0).unsqueeze(-1).float()
+            mask_to = torch.from_numpy(mask_to).unsqueeze(0).unsqueeze(-1).float()
+            output_mask = torch.min(output_mask, mask_to)
+
+            output = image_to_tensor(output).unsqueeze(0)
+            img_to = image_to_tensor(img_to).unsqueeze(0)
+            
+            if grow != 0:
+                output_mask = expand_mask(output_mask.squeeze(-1), grow, True).unsqueeze(-1)
+
+            if blur > 1:
+                if blur % 2 == 0:
+                    blur+= 1
+                output_mask = T.functional.gaussian_blur(output_mask.permute(0,3,1,2), blur).permute(0,2,3,1)
+
+            padding = 0
+
+            _, y, x, _ = torch.where(mask_to)
+            x1 = max(0, x.min().item() - padding)
+            y1 = max(0, y.min().item() - padding)
+            x2 = min(img_to.shape[2], x.max().item() + padding)
+            y2 = min(img_to.shape[1], y.max().item() + padding)
+            cm_ref = img_to[:, y1:y2, x1:x2, :]
+
+            _, y, x, _ = torch.where(output_mask)
+            x1 = max(0, x.min().item() - padding)
+            y1 = max(0, y.min().item() - padding)
+            x2 = min(output.shape[2], x.max().item() + padding)
+            y2 = min(output.shape[1], y.max().item() + padding)
+            cm_image = output[:, y1:y2, x1:x2, :]
+
+            normalized = cm.transfer(src=Normalizer(cm_image[0].numpy()).type_norm() , ref=Normalizer(cm_ref[0].numpy()).type_norm(), method='mkl')
+            normalized = torch.from_numpy(normalized).unsqueeze(0)
+
+            factor = 0.8
+
+            output[:, y1:y1+cm_image.shape[1], x1:x1+cm_image.shape[2], :] = factor * normalized + (1 - factor) * cm_image
+
+            output_image = output * output_mask + img_to * (1 - output_mask)
+            output_image = output_image.clamp(0, 1)
+            output_mask = output_mask.clamp(0, 1).squeeze(-1)
+
+            result_image.append(output_image)
+            result_mask.append(output_mask)
+
+            if steps > 1:
+                pbar.update(1)
         
-        matrix = cv2.estimateAffine2D(from_points, to_points)[0]
-        output = cv2.warpAffine(image_from, matrix, (image_to.shape[1], image_to.shape[0]), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT_101)
+        result_image = torch.cat(result_image, dim=0)
+        result_mask = torch.cat(result_mask, dim=0)
 
-        mask_from = mask_from_landmarks(image_from, shape_from)
-        mask_to = mask_from_landmarks(image_to, shape_to)
-        output_mask = cv2.warpAffine(mask_from, matrix, (image_to.shape[1], image_to.shape[0]))
-
-        output_mask = torch.from_numpy(output_mask).unsqueeze(0).unsqueeze(-1).float()
-        mask_to = torch.from_numpy(mask_to).unsqueeze(0).unsqueeze(-1).float()
-        output_mask = torch.min(output_mask, mask_to)
-
-        output = image_to_tensor(output).unsqueeze(0)
-        image_to = image_to_tensor(image_to).unsqueeze(0)
-        
-        if grow != 0:
-            output_mask = expand_mask(output_mask.squeeze(-1), grow, True).unsqueeze(-1)
-
-        if blur > 1:
-            if blur % 2 == 0:
-                blur+= 1
-            output_mask = T.functional.gaussian_blur(output_mask.permute(0,3,1,2), blur).permute(0,2,3,1)
-
-        padding = 0
-
-        _, y, x, _ = torch.where(mask_to)
-        x1 = max(0, x.min().item() - padding)
-        y1 = max(0, y.min().item() - padding)
-        x2 = min(image_to.shape[2], x.max().item() + padding)
-        y2 = min(image_to.shape[1], y.max().item() + padding)
-        cm_ref = image_to[:, y1:y2, x1:x2, :]
-
-        _, y, x, _ = torch.where(output_mask)
-        x1 = max(0, x.min().item() - padding)
-        y1 = max(0, y.min().item() - padding)
-        x2 = min(output.shape[2], x.max().item() + padding)
-        y2 = min(output.shape[1], y.max().item() + padding)
-        cm_image = output[:, y1:y2, x1:x2, :]
-
-        normalized = cm.transfer(src=Normalizer(cm_image[0].numpy()).type_norm() , ref=Normalizer(cm_ref[0].numpy()).type_norm(), method='mkl')
-        normalized = torch.from_numpy(normalized).unsqueeze(0)
-
-        factor = 0.8
-
-        output[:, y1:y1+cm_image.shape[1], x1:x1+cm_image.shape[2], :] = factor * normalized + (1 - factor) * cm_image
-
-        output_image = output * output_mask + image_to * (1 - output_mask)
-        output_image = output_image.clamp(0, 1)
-        output_mask = output_mask.clamp(0, 1).squeeze(-1)
-
-        return (output_image, output_mask)
+        return (result_image, result_mask)
 
 """
 def cos_distance(source, test):
