@@ -1,8 +1,8 @@
 # Face Analysis for ComfyUI
 
-This extension uses [DLib](http://dlib.net/) or [InsightFace](https://github.com/deepinsight/insightface) to calculate the Euclidean and Cosine *distance* between two faces.
+This extension uses [DLib](http://dlib.net/) or [InsightFace](https://github.com/deepinsight/insightface) to perform various operations on human faces.
 
-The best way to evaluate generated faces is to first send a batch of 3 reference images to the node and compare them to a forth reference (all actual pictures of the person). That will give you a baseline number that you can use to compare to generated images.
+The most obvious is to calculate the similarity between two faces. The best way to evaluate generated faces is to first send a batch of 3 reference images to the node and compare them to a forth reference (all actual pictures of the person). That will give you a baseline number that you can use to compare to generated images.
 
 ## Installation
 
@@ -13,3 +13,5 @@ For DLIB download [Shape Predictor](https://huggingface.co/matt3ounstable/dlib_p
 Precompiled Dlib for Windows can be found [here](https://github.com/z-mahmud22/Dlib_Windows_Python3.x).
 
 ![face analysis](./face_analysis.jpg)
+
+The extension also supports [AuraFace](https://huggingface.co/fal/AuraFace-v1/tree/main) that is a free alternative to InsightFace. Download all the files and place them under `models/insightface/models/auraface/`

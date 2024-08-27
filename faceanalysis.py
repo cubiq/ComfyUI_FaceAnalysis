@@ -275,6 +275,7 @@ class FaceAnalysisModels:
         libraries = []
         if IS_INSIGHTFACE_INSTALLED:
             libraries.append("insightface")
+            libraries.append("auraface")
         if IS_DLIB_INSTALLED:
             libraries.append("dlib")
 
@@ -291,7 +292,9 @@ class FaceAnalysisModels:
         out = {}
 
         if library == "insightface":
-            out = InsightFace(provider)
+            out = InsightFace(provider=provider)
+        elif library == "auraface":
+            out = InsightFace(provider=provider, name="auraface")
         else:
             out = DLib()
 
