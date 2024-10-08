@@ -702,7 +702,7 @@ class FaceWarp:
 
             if shape_from is None or shape_to is None:
                 print(f"\033[96mNo landmarks detected at frame {i}\033[0m")
-                img = img_to.unsqueeze(0)
+                img = image_to[i].unsqueeze(0)
                 mask = torch.zeros_like(img)[:,:,:1]
                 result_image.append(img)
                 result_mask.append(mask)
