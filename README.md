@@ -4,6 +4,9 @@ This extension uses [DLib](http://dlib.net/) or [InsightFace](https://github.com
 
 The most obvious is to calculate the similarity between two faces. The best way to evaluate generated faces is to first send a batch of 3 reference images to the node and compare them to a forth reference (all actual pictures of the person). That will give you a baseline number that you can use to compare to generated images.
 
+> [!IMPORTANT]  
+> **2025.04.14** - I do not use ComfyUI as my main way to interact with Gen AI anymore as a result I'm setting the repository in "maintenance only" mode. If there are crucial updates or PRs I might still consider merging them but I do not plan any consistent work on this repo.
+
 ## Installation
 
 You need to install either InsightFace or Dlib (or both).
