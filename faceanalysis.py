@@ -127,6 +127,8 @@ class InsightFace:
         y = []
         w = []
         h = []
+        if faces is None:
+            return (img, x, y, w, h)
         for face in faces:
             x1, y1, x2, y2 = face['bbox']
             width = x2 - x1
@@ -212,6 +214,8 @@ class DLib:
         y = []
         w = []
         h = []
+        if faces is None:
+            return (img, x, y, w, h)
         for face in faces:
             x1 = max(0, face.left() - int(face.width() * padding_percent) - padding)
             y1 = max(0, face.top() - int(face.height() * padding_percent) - padding)
@@ -329,6 +333,8 @@ class FaceBoundingBox:
         for i in image:
             i = T.ToPILImage()(i.permute(2, 0, 1)).convert('RGB')
             img, x, y, w, h = analysis_models.get_bbox(i, padding, padding_percent)
+            if not img:
+                continue
             out_img.extend(img)
             out_x.extend(x)
             out_y.extend(y)
